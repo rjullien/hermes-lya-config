@@ -70,7 +70,22 @@ Variante **slim** de `hermes-leo-config` : pas de toolchain Go, pas de Devin CLI
    (`workloads/agents/hermes-lya/hermes-lya-deployment.yaml`) → PR vers
    `BaptTF/vps-infra` → ArgoCD déploie.
 
-## 🤖 Renovate — ce que l'agent doit savoir
+## 🤖 Automatisation (parity Leo) — ce que l'agent doit savoir
+
+La boucle complète est la même que `hermes-leo-config`, pour 3 outils :
+
+| Pièce | Rôle |
+|---|---|
+| `renovate.yml` + `renovate.json` | bumps base (7j), gws/gh/kubectl (3j), Actions ; automerge ; `postUpgradeTasks` → checksums |
+| `pr-validation.yml` | gate `build-and-verify` : checksums → build → smoke 3 outils → Trivy CRITICAL |
+| `auto-release.yml` | calver + build-in-same-run (anti-récursion GitHub) |
+| `build.yml` / `build-image.yml` | push `ghcr.io/rjullien/hermes-lya-config` (calver/`latest` uniquement sur release) |
+
+**Secret hors code (René doit le créer, comme sur Leo) :** `RENOVATE_TOKEN`
+(PAT repo + `workflow`). Sans lui : Renovate et auto-release cassent. Voir
+README §« Automatisation — secrets & réglages GitHub ».
+
+## 🤖 Renovate — détail opérationnel
 
 - Renovate tourne **self-hosted via GitHub Actions** (`renovate.yml`), PAS
   l'app publique. Secret `RENOVATE_TOKEN` requis (PAT, car `GITHUB_TOKEN` ne

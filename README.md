@@ -127,6 +127,56 @@ construction.
 protection sur `main` (checks requis, cf. F-01) et l'immutabilité/rétention du
 package GHCR.
 
+## Automatisation — secrets & réglages GitHub (à faire une fois)
+
+L'automation est **identique à Leo** (Renovate self-hosted, auto-release calver,
+build+push GHCR, gate Trivy). Le code est déjà en place ; René doit configurer
+le dépôt GitHub (un agent ne peut pas créer les secrets) :
+
+### 1. Secret `RENOVATE_TOKEN` (obligatoire)
+
+Settings → Secrets and variables → Actions → New repository secret :
+
+| Champ | Valeur |
+|---|---|
+| Name | `RENOVATE_TOKEN` |
+| Value | PAT (classic `gho_…` ou fine-grained) **dédié à ce dépôt**, comme sur Leo |
+
+Scopes / permissions du PAT :
+- **Contents: Read and write** (ouvrir des branches/PRs, merge automerge)
+- **Pull requests: Read and write**
+- **Issues: Read and write** (Dependency Dashboard)
+- **Workflows: Read and write** (ou scope classic `workflow`) — sans ça Renovate
+  ne peut pas bumper les Actions dans `.github/workflows/`
+- **Metadata: Read** (fine-grained)
+
+Sans ce secret : `renovate.yml` échoue (`Integration unauthorized`) et
+`auto-release.yml` ne peut pas créer la release (il utilise aussi
+`secrets.RENOVATE_TOKEN`).
+
+### 2. Permissions GitHub Actions (automerge + packages)
+
+Settings → Actions → General :
+- **Allow GitHub Actions to create and approve pull requests** — requis pour
+  que Renovate (via le PAT) / l'automerge fonctionne comme sur Leo
+- Workflow permissions : **Read and write permissions** (le workflow
+  `build-image.yml` pousse sur GHCR avec `packages: write`)
+
+Settings → Actions → General → Workflow permissions doit permettre
+`GITHUB_TOKEN` d'écrire des packages ; les jobs `build` déclarent déjà
+`packages: write` + `attestations: write`.
+
+### 3. Branch protection `main` (recommandé, comme Leo)
+
+- Require status check **`build-and-verify`** (workflow PR Validation)
+- Require branch to be up to date before merging
+- (optionnel) Restrict who can push ; laisser Renovate via le PAT
+
+### 4. Package GHCR
+
+Après la première release, le package `ghcr.io/rjullien/hermes-lya-config`
+apparaît. Le rendre **public** si le pod doit le tirer sans auth (comme Leo).
+
 ## Renovate (maintenance des versions)
 
 Renovate tourne self-hosted via **GitHub Actions** (`renovate.yml`, pas l'app

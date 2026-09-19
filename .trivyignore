@@ -1,0 +1,15 @@
+# Baseline Trivy — exceptions héritées de l'image de base, que la couche de ce
+# dépôt ne peut pas corriger. Elles se résolvent en bumpant l'image de base
+# (suivi par Renovate).
+#
+# NE PAS ajouter ici une vulnérabilité introduite par la couche de ce dépôt :
+# la porte bloquante doit rester capable d'échouer sur une régression.
+# Réévaluer cette liste à chaque bump de l'image de base.
+#
+# CVE-2026-63374 : anyio 4.12.1 dans le venv de hermes-agent (corrigé en 4.14.2).
+# Présente sur v2026.9.11 et encore sur v2026.9.14 (uv.lock toujours 4.12.1).
+# Leo (même base) devrait aussi l'ajouter — on ne change que Lya ici.
+
+CVE-2026-33747
+CVE-2026-59873
+CVE-2026-63374

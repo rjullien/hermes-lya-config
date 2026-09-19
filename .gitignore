@@ -1,0 +1,4 @@
+# État de travail des agents IA (plans de tâche, findings, notes d'environnement).
+# Utile localement, sans intérêt dans l'historique d'un dépôt public : ces fichiers
+# ne décrivent pas l'image, ils décrivent une session de travail.
+.agents/

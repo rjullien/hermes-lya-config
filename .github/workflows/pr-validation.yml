@@ -1,0 +1,145 @@
+name: PR Validation (build + smoke + scan)
+
+# F-01 — Valide l'image sur chaque pull request SANS la pousser.
+# Objectif : aucune mise à jour de dépendance ne peut atteindre `main` sans
+# que le Dockerfile soit réellement construit, les 3 outils testés, et l'image
+# scannée. Ce workflow ne publie rien (push: false).
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-verify:
+    runs-on: ubuntu-latest
+    # Borne dure du job (le défaut GitHub est de 6 h). La garde checksums qui
+    # précède le build fait du réseau avec retries (3 tentatives, timeout 60 s
+    # par requête) et rehashe les 3 artefacts sur `push: main` ; le script porte
+    # son propre budget global (10 min en `--check`, 20 min avec
+    # `--verify-artifacts`), ce cap est le filet au-dessus : 20 min de garde au
+    # pire + un build à froid + les 2 scans Trivy doivent tenir dedans.
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Node est requis par l'étape suivante (la garde checksums) ; l'image
+      # `ubuntu-latest` en fournit déjà un, on l'épingle pour ne pas dépendre de sa
+      # rotation. Le script n'a AUCUNE dépendance npm : pas d'install ici.
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "22"
+
+      # Filet de sécurité derrière les `postUpgradeTasks` de renovate.json : si
+      # la resynchronisation `ARG <OUTIL>_SHA256` ne s'est pas exécutée
+      # (RENOVATE_ALLOWED_COMMANDS retiré, script en échec, édition manuelle...),
+      # la PR échoue ICI, avant le build, avec un message nommant l'outil et les
+      # deux valeurs, au lieu d'un `sha256sum -c` opaque au bout du
+      # téléchargement.
+      #
+      # POURQUOI UNE ÉTAPE ET PAS UN JOB SÉPARÉ : `build-and-verify` est le check
+      # REQUIS de la branch protection de `main`. En job distinct relié par
+      # `needs:`, un échec de la garde rendait `build-and-verify` *skipped*, et
+      # GitHub compte un check requis skipped comme satisfait : le merge humain
+      # redevenait possible sur une PR dont l'image n'a jamais été construite ni
+      # scannée. En étape du job requis, un échec est un échec.
+      #
+      # SUR UNE PR : --check n'interroge que les 3 endpoints de checksum publiés
+      # (3 petites requêtes, aucun artefact retéléchargé). Le `sha256sum -c` du
+      # Dockerfile rehashe bien l'archive réellement téléchargée, MAIS le build
+      # ci-dessous utilise `cache-from: type=gha` : la couche
+      # `RUN curl … && sha256sum -c` n'est rejouée que si son `ARG` version ou
+      # SHA change. Sur une PR qui ne touche pas ces lignes, aucun octet
+      # d'artefact n'est donc rehashé, ni par la garde ni par le build.
+      #
+      # SUR `push: main` : --verify-artifacts rehashe les 3 artefacts pour
+      # rejouer la contre-vérification S-01 que le cache de couches ne
+      # rejoue pas. Un run par merge, pas un par PR.
+      #
+      # Font échouer cette étape : un écart commité ≠ publié ; un checksum publié
+      # impossible à établir (404, asset renommé) ; l'indisponibilité de TOUS les
+      # amonts (la garde n'a alors rien vérifié) ; et, avec --verify-artifacts, le
+      # moindre artefact non rehashé. Seule une indisponibilité PARTIELLE (réseau,
+      # 5xx, throttling sur un amont) produit un avertissement — voir l'en-tête du
+      # script.
+      - name: Vérifier les SHA-256 des 3 téléchargements
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            node scripts/sync-download-checksums.mjs --check
+          else
+            node scripts/sync-download-checksums.mjs --check --verify-artifacts
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          push: false
+          load: true
+          tags: hermes-lya-config:pr-validation
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+      - name: Smoke test — les 3 outils répondent
+        run: |
+          set -euo pipefail
+          img=hermes-lya-config:pr-validation
+          echo "::group::Versions des outils ajoutés"
+          docker run --rm --entrypoint gws     "$img" --version
+          docker run --rm --entrypoint gh      "$img" --version
+          docker run --rm --entrypoint kubectl "$img" version --client
+          echo "::endgroup::"
+
+      - name: Vérifier l'entrypoint hérité et l'architecture
+        run: |
+          set -euo pipefail
+          img=hermes-lya-config:pr-validation
+          entrypoint=$(docker image inspect "$img" --format '{{json .Config.Entrypoint}}')
+          arch=$(docker image inspect "$img" --format '{{.Architecture}}')
+          echo "entrypoint=$entrypoint arch=$arch"
+          test "$entrypoint" = '["/opt/hermes/docker/entrypoint-dispatch.sh"]'
+          test "$arch" = "amd64"
+
+      # Rapport complet HIGH/CRITICAL — informatif, ne bloque jamais.
+      - name: Scan de vulnérabilités — rapport (informatif)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: hermes-lya-config:pr-validation
+          format: table
+          exit-code: "0"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+        env:
+          TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db
+
+      # Porte bloquante : échoue si une CRITICAL corrigible apparaît EN DEHORS
+      # de la baseline héritée de l'image de base (.trivyignore). Une régression
+      # introduite par ce dépôt fait donc rougir la PR ; le reliquat hérité est
+      # traité séparément (S-03) et documenté, daté, dans .trivyignore.
+      - name: Porte bloquante — nouvelles CRITICAL corrigibles
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: hermes-lya-config:pr-validation
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          vuln-type: os,library
+          severity: CRITICAL
+        env:
+          TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db

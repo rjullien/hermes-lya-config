@@ -1,0 +1,48 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "customManagers": [
+    {
+      "description": "Lit les 3 couples `# renovate:` + `ARG <OUTIL>_VERSION=` du Dockerfile. NE CAPTURE PAS le SHA-256 : aucune des datasources utilisées (github-releases, github-tags) ne sait résoudre le SHA-256 d'une archive comme un digest. Le capturer cassait des updates (branche renovate/kubernetes-kubernetes-digest en erreur en essayant d'écrire un SHA de commit git kubernetes/kubernetes dans KUBECTL_SHA256, « Could not determine new digest for update » pour googleworkspace/cli et cli/cli). Le SHA-256 est désormais maintenu par postUpgradeTasks (scripts/sync-download-checksums.mjs).",
+      "customType": "regex",
+      "managerFilePatterns": ["/^Dockerfile$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)\\nARG \\w+_VERSION=(?<currentValue>[^\\s]+)"
+      ],
+      "extractVersionTemplate": "^v?(?<version>.*)$"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Image de base hermes-agent : calver vYYYY.M.D — délai 7j (sécurité), AUTOMERGE (review humaine = renovate vps-infra)",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["nousresearch/hermes-agent"],
+      "versioning": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)(?:\\.(?<build>\\d+))?$",
+      "minimumReleaseAge": "7 days",
+      "automerge": true,
+      "automergeType": "pr"
+    },
+    {
+      "description": "Binaires outils (gws, gh, kubectl) : releases officielles — délai 3j, AUTOMERGE. postUpgradeTasks resynchronise `ARG <OUTIL>_SHA256` avec la version bumpée, dans le commit Renovate lui-même (donc relisible dans le diff de la PR). Sans ça, `sha256sum -c` rejette la nouvelle archive et le build de la PR échoue. Exige RENOVATE_ALLOWED_COMMANDS côté renovate.yml (config admin, impossible ici).",
+      "matchPackageNames": ["googleworkspace/cli", "cli/cli", "kubernetes/kubernetes"],
+      "minimumReleaseAge": "3 days",
+      "automerge": true,
+      "automergeType": "pr",
+      "postUpgradeTasks": {
+        "commands": ["node scripts/sync-download-checksums.mjs --write --only={{{depName}}}"],
+        "fileFilters": ["Dockerfile"],
+        "executionMode": "update"
+      }
+    },
+    {
+      "description": "GitHub Actions du repo : automerge après checks",
+      "matchDatasources": ["github-tags"],
+      "matchManagers": ["github-actions"],
+      "automerge": true,
+      "automergeType": "pr"
+    }
+  ],
+  "pinDigests": true,
+  "automergeType": "pr",
+  "prBodyColumns": ["Package", "Update", "Type", "Change", "Notes"]
+}

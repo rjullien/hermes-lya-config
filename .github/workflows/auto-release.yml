@@ -1,0 +1,141 @@
+name: Auto Release
+# Crée une release calver quand un bump Renovate merge change une version d'outil
+# (ARG *_VERSION=) dans le Dockerfile. Les changements de commentaires ou checksums
+# seuls ne déclenchent ni release ni build. Le build est ensuite lancé DANS LE
+# MÊME RUN via le job `build` (workflow réutilisable build-image.yml) -> pousse
+# les tags vYYYY.M.D / vYYYY.M / latest / sha-<commit>. On n'attend PAS l'event
+# `release: published` : il est supprimé par la protection anti-récursion de
+# GitHub quand la release est créée depuis un workflow (voir le job `build`).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    # Exposé au job `build` : le tag calver calculé et le drapeau `changed`
+    # (une version d'outil a-t-elle réellement changé). `build` s'en sert pour
+    # se déclencher uniquement quand une release a été créée et pour tagger
+    # l'image avec la bonne version calver.
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      changed: ${{ steps.check.outputs.changed }}
+    steps:
+      - name: Checkout (full history for tag diff)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Compute calver tag (vYYYY.M.D[.N])
+        id: tag
+        run: |
+          BASE="v$(date -u +%Y.%-m.%-d)"
+          TAG="$BASE"
+          N=1
+          while gh release view "$TAG" --repo "${{ github.repository }}" 2>/dev/null; do
+            TAG="${BASE}.$N"
+            N=$((N+1))
+          done
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if no *_VERSION= argument changed since last release
+        id: check
+        run: |
+          LAST_TAG=$(gh release list --repo "${{ github.repository }}" --limit 1 --json tagName --jq '.[0].tagName')
+          if [ -z "$LAST_TAG" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Compare only ARG *_VERSION= lines, not comments or checksums
+          CURRENT_VERSIONS=$(grep -E '^ARG [A-Z_]+_VERSION=' Dockerfile | sort)
+          LAST_VERSIONS=$(git show "$LAST_TAG":Dockerfile 2>/dev/null | grep -E '^ARG [A-Z_]+_VERSION=' | sort)
+          if [ "$CURRENT_VERSIONS" = "$LAST_VERSIONS" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build release notes (outils changés, versions avant/après)
+        id: notes
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          LAST_TAG=$(gh release list --repo "${{ github.repository }}" --limit 1 --json tagName --jq '.[0].tagName')
+          if [ -z "$LAST_TAG" ]; then
+            echo "NOTES=Première release automatique." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Extrait les ARG *_VERSION= changés avec versions avant (old) -> après (new)
+          NOTES=""
+          while read -r ARG_NAME; do
+            [ -z "$ARG_NAME" ] && continue
+            OLD=$(git show "$LAST_TAG":Dockerfile 2>/dev/null | grep -E "^ARG $ARG_NAME=" | head -1 | cut -d= -f2-)
+            NEW=$(grep -E "^ARG $ARG_NAME=" Dockerfile | head -1 | cut -d= -f2-)
+            OLD=${OLD:-?}
+            NOTES+="- \`$ARG_NAME\` : \`$OLD\` -> \`$NEW\`"$'\n'
+          done < <(git diff "$LAST_TAG" -- Dockerfile | grep -E '^[+-]ARG [A-Z_]+_VERSION=' | sed -E 's/^[+-]ARG ([A-Z_]+)=.*/\1/' | sort -u)
+          if [ -z "$NOTES" ]; then
+            NOTES="Mise à jour du Dockerfile (aucune version d'outil modifiée)."
+          fi
+          {
+            echo "NOTES<<EOF"
+            echo "## Nouvelles versions"
+            echo "$NOTES"
+            echo ""
+            echo "Release automatique déclenchée par un merge de dépendance (Renovate) sur le Dockerfile."
+            echo "Les credentials restent sur le PVC /opt/data — aucun secret dans l'image."
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        if: steps.check.outputs.changed == 'true'
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          NOTES: ${{ steps.notes.outputs.NOTES }}
+          # Le build ne dépend PLUS de la ré-émission de l'event `release:
+          # published` (il tourne dans le job `build` de ce même run), donc le
+          # choix du token ici n'a plus d'incidence sur le déclenchement du
+          # build. On conserve RENOVATE_TOKEN (inoffensif) : c'est un OAuth
+          # token `gho_...` que GitHub traite comme une intégration pour
+          # l'anti-récursion, il ne ré-émettait donc de toute façon pas l'event
+          # (contrairement à ce qu'espérait #32). La release reste créée
+          # correctement.
+          GITHUB_TOKEN: ${{ secrets.RENOVATE_TOKEN }}
+        run: |
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --title "hermes-lya-config $TAG" \
+            --notes "$NOTES"
+
+  # Build + push de l'image DANS LE MÊME RUN que la release. Indispensable :
+  # la release ci-dessus est créée depuis un workflow, donc son event
+  # `release: published` est supprimé par la protection anti-récursion de
+  # GitHub et build.yml ne se déclenche jamais sur ce chemin. On appelle donc
+  # directement le workflow réutilisable ici. Un appel via `jobs.<id>.uses:`
+  # s'exécute dans le même run logique et n'a pas besoin d'un ré-émission
+  # d'event.
+  build:
+    needs: release
+    # Seulement si une release a bien été créée (une version d'outil a changé) :
+    # un changement de commentaire/checksum seul ne crée ni release ni build.
+    if: needs.release.outputs.changed == 'true'
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    uses: ./.github/workflows/build-image.yml
+    with:
+      # C'est bien une release : tags calver (vX.Y.Z, vX.Y) + latest + sha.
+      publish_release_tags: true
+      # github.ref vaut ici refs/heads/main (event push), donc metadata-action
+      # n'a aucun tag à parser : on passe la version calver explicitement.
+      release_tag: ${{ needs.release.outputs.tag }}
+    secrets: inherit

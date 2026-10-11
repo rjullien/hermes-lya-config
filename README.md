@@ -91,7 +91,8 @@ revérifié » et rien d'autre.
 
 ## Versioning — calver `vYYYY.M.D`
 
-Le repo est versionné **calver** comme hermes-agent (ex: `v2026.8.31`).
+Le repo est versionné **calver** `vYYYY.M.D` (ex: `v2026.8.31`), indépendamment
+du semver `v0.x.y` de l'image de base hermes-agent.
 Une **release GitHub** déclenche le build et génère les tags image :
 `auto-release.yml` crée cette release automatiquement quand un merge Renovate
 change une version d'outil (`ARG *_VERSION=`) **ou l'image de base** (ligne

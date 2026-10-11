@@ -14,10 +14,10 @@
   ],
   "packageRules": [
     {
-      "description": "Image de base hermes-agent : calver vYYYY.M.D — délai 7j (sécurité), AUTOMERGE (review humaine = renovate vps-infra)",
+      "description": "Image de base hermes-agent : semver v0.x.y (l'amont a abandonné le calver après v2026.9.24 = v0.21.5 ; v2026.9.24 est le DERNIER tag calver) — délai 7j (sécurité), AUTOMERGE (review humaine = renovate vps-infra)",
       "matchDatasources": ["docker"],
       "matchPackageNames": ["nousresearch/hermes-agent"],
-      "versioning": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)(?:\\.(?<build>\\d+))?$",
+      "versioning": "semver",
       "minimumReleaseAge": "7 days",
       "automerge": true,
       "automergeType": "pr"

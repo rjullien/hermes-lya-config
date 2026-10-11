@@ -1,7 +1,9 @@
 name: Auto Release
 # Crée une release calver quand un bump Renovate merge change une version d'outil
-# (ARG *_VERSION=) dans le Dockerfile. Les changements de commentaires ou checksums
-# seuls ne déclenchent ni release ni build. Le build est ensuite lancé DANS LE
+# (ARG *_VERSION=) OU l'image de base (ligne FROM) dans le Dockerfile. Un bump de
+# la seule base hermes-agent crée donc une release + un build, comme un bump
+# d'outil. Les changements de commentaires ou checksums seuls ne déclenchent ni
+# release ni build. Le build est ensuite lancé DANS LE
 # MÊME RUN via le job `build` (workflow réutilisable build-image.yml) -> pousse
 # les tags vYYYY.M.D / vYYYY.M / latest / sha-<commit>. On n'attend PAS l'event
 # `release: published` : il est supprimé par la protection anti-récursion de
@@ -46,7 +48,7 @@ jobs:
           done
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Skip if no *_VERSION= argument changed since last release
+      - name: Skip if no *_VERSION= argument nor base image changed since last release
         id: check
         run: |
           LAST_TAG=$(gh release list --repo "${{ github.repository }}" --limit 1 --json tagName --jq '.[0].tagName')
@@ -54,9 +56,12 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # Compare only ARG *_VERSION= lines, not comments or checksums
-          CURRENT_VERSIONS=$(grep -E '^ARG [A-Z_]+_VERSION=' Dockerfile | sort)
-          LAST_VERSIONS=$(git show "$LAST_TAG":Dockerfile 2>/dev/null | grep -E '^ARG [A-Z_]+_VERSION=' | sort)
+          # Compare ARG *_VERSION= lines AND the FROM line (image de base) —
+          # comments and checksums excluded. Un bump de la seule base
+          # hermes-agent doit créer une release comme un bump d'outil.
+          FILTER='^(ARG [A-Z_]+_VERSION=|FROM )'
+          CURRENT_VERSIONS=$(grep -E "$FILTER" Dockerfile | sort)
+          LAST_VERSIONS=$(git show "$LAST_TAG":Dockerfile 2>/dev/null | grep -E "$FILTER" | sort)
           if [ "$CURRENT_VERSIONS" = "$LAST_VERSIONS" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
@@ -81,6 +86,12 @@ jobs:
             OLD=${OLD:-?}
             NOTES+="- \`$ARG_NAME\` : \`$OLD\` -> \`$NEW\`"$'\n'
           done < <(git diff "$LAST_TAG" -- Dockerfile | grep -E '^[+-]ARG [A-Z_]+_VERSION=' | sed -E 's/^[+-]ARG ([A-Z_]+)=.*/\1/' | sort -u)
+          # Bump de l'image de base (ligne FROM) : l'afficher aussi.
+          OLD_FROM=$(git show "$LAST_TAG":Dockerfile 2>/dev/null | grep -E '^FROM ' | head -1)
+          NEW_FROM=$(grep -E '^FROM ' Dockerfile | head -1)
+          if [ -n "$OLD_FROM" ] && [ "$OLD_FROM" != "$NEW_FROM" ]; then
+            NOTES+="- Image de base : \`${OLD_FROM#FROM }\` -> \`${NEW_FROM#FROM }\`"$'\n'
+          fi
           if [ -z "$NOTES" ]; then
             NOTES="Mise à jour du Dockerfile (aucune version d'outil modifiée)."
           fi

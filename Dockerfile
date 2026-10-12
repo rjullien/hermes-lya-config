@@ -18,7 +18,7 @@
 # ⚠️ ARCHITECTURE (P-03) : image linux/amd64 UNIQUEMENT. Les URLs ci-dessous
 # ciblent x86_64/amd64 et build.yml ne construit que linux/amd64. Pour arm64,
 # paramétrer via TARGETARCH et valider les 3 binaires (voir README §Architecture).
-FROM nousresearch/hermes-agent:v2026.9.24@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7
+FROM nousresearch/hermes-agent:v0.21.6@sha256:55e192fba0cd4fde61142abbff5adeacff40efdb482ccd0ff877924bd274f909
 
 # Ordre des couches (P-02) : chaque couple `# renovate` + ARG version + ARG
 # SHA256 est placé JUSTE avant le RUN qui l'utilise, du plus léger au plus lourd
@@ -69,6 +69,14 @@ RUN curl -fsSL -o /tmp/kubectl https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin
     && echo "${KUBECTL_SHA256}  /tmp/kubectl" | sha256sum -c - \
     && install -m 0755 /tmp/kubectl /usr/local/bin/kubectl \
     && rm -f /tmp/kubectl
+
+# --- hermes sur le PATH « standard » (compat K8s / PATH écrasé) ---
+# Depuis v0.21.6, main-wrapper.sh et dashboard/run n'activent plus le venv
+# et s'appuient uniquement sur `ENV PATH=/opt/hermes/bin:…` de l'image amont.
+# Kubernetes remplace souvent ce PATH : `s6-applyuidgid` échoue alors avec
+# `unable to exec hermes` (exit 127). Le shim amont /opt/hermes/bin/hermes
+# ré-exécute le binaire venv par chemin absolu ; un symlink suffit.
+RUN ln -sf /opt/hermes/bin/hermes /usr/local/bin/hermes
 
 # Les scripts/venvs/skills restent sur le PVC (/opt/data) et les ConfigMaps —
 # l'image ne porte que les binaires système/tools.

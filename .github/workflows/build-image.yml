@@ -23,13 +23,13 @@ on:
         default: false
       release_tag:
         description: >-
-          Tag calver de la release (ex. v2026.9.7). Requis quand
-          publish_release_tags=true et que l'appelant n'est pas déclenché par
-          l'event release lui-même : sur le chemin auto-release.yml (push sur
-          main) `github.ref` vaut refs/heads/main, donc `type=semver` n'a aucun
-          tag à parser et doit recevoir la version explicitement via `value=`.
-          Laissé vide sur le chemin release: build.yml (github.ref porte déjà le
-          tag) et sur workflow_dispatch (aucun tag calver émis).
+          Tag calver de la release (ex. v2026.9.7 ou v2026.10.12.1). Requis
+          quand publish_release_tags=true et que l'appelant n'est pas déclenché
+          par l'event release lui-même : sur le chemin auto-release.yml (push
+          sur main) `github.ref` vaut refs/heads/main, donc l'étape « Compute
+          calver tags » doit recevoir la version explicitement. Laissé vide sur
+          le chemin release: build.yml (l'étape lit alors `github.ref_name`) et
+          sur workflow_dispatch (aucun tag calver émis).
         required: false
         type: string
         default: ""
@@ -61,6 +61,28 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Calver ≠ semver : un tag vYYYY.M.D[.N] (4 composants, ex. v2026.10.12.1)
+      # n'est pas parsable par `type=semver`, qui l'ignore SILENCIEUSEMENT — la
+      # release sort alors avec `sha-<commit>` seul, sans tag calver ni `latest`,
+      # et Image Updater ne déploie rien. On calcule donc les tags calver ici :
+      # tag exact de la release, tag jour (vYYYY.M.D) et tag mois (vYYYY.M).
+      - name: Compute calver tags
+        id: calver
+        if: ${{ inputs.publish_release_tags }}
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "$RELEASE_TAG" in
+            v*.*.*.*) day="${RELEASE_TAG%.*}" ;;  # vX.Y.Z.W -> vX.Y.Z
+            *)        day="$RELEASE_TAG" ;;       # vX.Y.Z   -> vX.Y.Z
+          esac
+          {
+            echo "exact=$RELEASE_TAG"
+            echo "day=$day"
+            echo "month=${day%.*}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
@@ -70,8 +92,9 @@ jobs:
           # release, via l'input `publish_release_tags` (voir en-tête). Un
           # `workflow_dispatch` passe `false` et ne produit que `sha-<commit>`.
           tags: |
-            type=semver,pattern=v{{version}},value=${{ inputs.release_tag }},enable=${{ inputs.publish_release_tags }}
-            type=semver,pattern=v{{major}}.{{minor}},value=${{ inputs.release_tag }},enable=${{ inputs.publish_release_tags }}
+            type=raw,value=${{ steps.calver.outputs.exact }},enable=${{ inputs.publish_release_tags }}
+            type=raw,value=${{ steps.calver.outputs.day }},enable=${{ inputs.publish_release_tags && steps.calver.outputs.day != steps.calver.outputs.exact }}
+            type=raw,value=${{ steps.calver.outputs.month }},enable=${{ inputs.publish_release_tags }}
             type=raw,value=latest,enable=${{ inputs.publish_release_tags }}
             type=sha,prefix=sha-
 

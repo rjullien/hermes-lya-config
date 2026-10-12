@@ -104,6 +104,25 @@ jobs:
           docker run --rm --entrypoint kubectl "$img" version --client
           echo "::endgroup::"
 
+      # Garde anti-régression du crash prod v0.21.6 : si `hermes` n'est plus
+      # résolvable avec le PATH « standard » (celui que K8s injecte souvent,
+      # sans /opt/hermes/bin), s6-applyuidgid sort 127 et le gateway ne
+      # démarre jamais. On teste en user runtime (hermes / UID 10000), pas
+      # en root, pour coller au chemin s6-setuidgid.
+      - name: Smoke test — hermes résolvable (PATH runtime typique K8s)
+        run: |
+          set -euo pipefail
+          img=hermes-lya-config:pr-validation
+          docker run --rm --user hermes \
+            -e PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            --entrypoint bash "$img" -c '
+              set -euo pipefail
+              resolved=$(command -v hermes)
+              echo "hermes=$resolved"
+              test "$resolved" = /usr/local/bin/hermes
+              hermes --version
+            '
+
       - name: Vérifier l'entrypoint hérité et l'architecture
         run: |
           set -euo pipefail

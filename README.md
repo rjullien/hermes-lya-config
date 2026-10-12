@@ -24,6 +24,12 @@ En plus des binaires, le `Dockerfile` applique en `USER root` un
 trixie ; cette couche les tire dans notre image pour garder la porte Trivy
 CRITICAL (corrigibles) verte sans élargir `.trivyignore`.
 
+Le `Dockerfile` crée aussi un symlink `/usr/local/bin/hermes` → `/opt/hermes/bin/hermes`
+(shim amont) : depuis hermes-agent v0.21.6, le wrapper s6 ne source plus le
+venv et dépend du `ENV PATH` de l'image, que Kubernetes écrase souvent — sans
+ce lien, `s6-applyuidgid` ne trouve plus `hermes` (exit 127). La CI rejoue ce
+scénario (PATH standard, user `hermes`).
+
 ## Vérification des téléchargements (SHA-256)
 
 Les 3 binaires ne sont pas téléchargés « à l'aveugle ». Chaque `ARG *_VERSION`

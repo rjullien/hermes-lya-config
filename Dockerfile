@@ -34,9 +34,45 @@ USER root
 # perl…) alors que `apt` peut les appliquer ici. On ne les met PAS dans
 # `.trivyignore` — la porte doit rester capable d'échouer sur une régression
 # introduite par ce dépôt. Reliquats vraiment non patchables via apt → S-03.
-RUN apt-get update \
+#
+# SECURITY_CACHE_BUST : passé par la CI (semaine ISO UTC, ex. 2026-W44). Sans
+# ça, `cache-from: type=gha` rejoue cette couche tant que l'instruction RUN
+# est inchangée — un `apt-get upgrade` figé rate les DSA publiés après coup.
+# Redéclaré avant chaque RUN qui doit en dépendre (scope ARG).
+ARG SECURITY_CACHE_BUST=
+RUN echo "security-cache-bust=${SECURITY_CACHE_BUST}" \
+    && apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
+
+# Correctifs Python du venv hérité (porte Trivy CRITICAL) : même logique que
+# l'apt upgrade — la base digests-épinglée laisse certifi 2026.5.20/2026.6.17
+# (GHSA-6q48-6c7w-9gw2), Pillow 12.3.0 (CVE-2026-112393/112398/112403/112900/
+# 96639) et brotlicffi 1.2.0.2 (GHSA-9v8h-qqgm-4m35) en retard alors qu'un pip
+# upgrade les corrige ici. Pas de `.trivyignore` pour ces CRITICAL corrigibles.
+# Pillow 13 est un major bump : vérifié (hermes_cli, browser_harness importent).
+#
+# Deux sources de certifi dans la base :
+#   1. /opt/hermes/.venv (site-packages) — upgradé via ensurepip + pip, puis
+#      pip du venv retiré pour ne pas élargir la surface ;
+#   2. pip vendored dans le Python outils (/usr/local/bin/python3) — Trivy le
+#      compte aussi ; pip 26.2.2 vendors certifi 2026.10.19.
+# Copies périmées dans les caches uv purgées pour ne pas les recompter.
+ARG SECURITY_CACHE_BUST=
+RUN echo "security-cache-bust=${SECURITY_CACHE_BUST}" \
+    && /usr/local/bin/python3 -m pip install --no-cache-dir --upgrade "pip==26.2.2" \
+    && /opt/hermes/.venv/bin/python -m ensurepip --upgrade \
+    && /opt/hermes/.venv/bin/python -m pip install --no-cache-dir --upgrade \
+        "certifi==2026.10.19" \
+        "Pillow==13.0.0" \
+        "brotlicffi==1.2.1.0" \
+    && /opt/hermes/.venv/bin/python -m pip uninstall -y pip \
+    && rm -rf /root/.cache/pip \
+    && find /opt/hermes/uv-cache /root/.hermes -type d \
+        \( -name 'certifi-2026.5.*' -o -name 'certifi-2026.6.*' \
+           -o -name 'pillow-12.*' -o -name 'Pillow-12.*' \
+           -o -name 'brotlicffi-1.2.0.*' \) \
+        -prune -exec rm -rf {} + 2>/dev/null || true
 
 # --- gws : Google Workspace CLI (glibc/debian, pas de -musl) ---
 # Remplace himalaya pour tout le Gmail automatisé (API native, OAuth standard)

@@ -61,6 +61,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Semaine ISO UTC (ex. 2026-W44) → ARG SECURITY_CACHE_BUST du Dockerfile.
+      # Invalide les couches apt/pip security même si le texte du RUN est inchangé.
+      - name: Compute SECURITY_CACHE_BUST (semaine ISO UTC)
+        id: bust
+        run: echo "value=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
       # Calver ≠ semver : un tag vYYYY.M.D[.N] (4 composants, ex. v2026.10.12.1)
       # n'est pas parsable par `type=semver`, qui l'ignore SILENCIEUSEMENT — la
       # release sort alors avec `sha-<commit>` seul, sans tag calver ni `latest`,
@@ -106,6 +112,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            SECURITY_CACHE_BUST=${{ steps.bust.outputs.value }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64

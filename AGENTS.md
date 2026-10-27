@@ -80,6 +80,16 @@ La boucle complète est la même que `hermes-leo-config`, pour 3 outils :
 | `pr-validation.yml` | gate `build-and-verify` : checksums → build → smoke 3 outils → Trivy CRITICAL |
 | `auto-release.yml` | calver + build-in-same-run (anti-récursion GitHub) |
 | `build.yml` / `build-image.yml` | push `ghcr.io/rjullien/hermes-lya-config` (calver/`latest` uniquement sur release) |
+| `weekly-security-rebuild.yml` | lundi 03:15 UTC : rebuild `--no-cache` → smokes → Trivy CRITICAL ; rouge → issue, vert + content-manifest ≠ `latest` → release calver |
+
+**Rebuild sécurité hebdomadaire** : Renovate ne voit pas les paquets
+Debian/PyPI hérités de la base digests-épinglée. Le rebuild publie
+**seulement** si le *content-manifest* (dpkg trié + freeze venv + versions
+outils) diffère de `latest` — **pas** via le digest (timestamps). Porte rouge →
+issue `[security] Trivy CRITICAL — rebuild hebdomadaire`, pas de publish ;
+porte verte → l'issue ouverte est fermée. Les builds normaux passent
+`SECURITY_CACHE_BUST` (semaine ISO UTC) pour que le cache GHA ne fige pas les
+couches apt/pip security.
 
 **Secret hors code (René doit le créer, comme sur Leo) :** `RENOVATE_TOKEN`
 (PAT repo + `workflow`). Sans lui : Renovate et auto-release cassent. Voir

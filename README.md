@@ -25,7 +25,7 @@ trixie ; cette couche les tire dans notre image pour garder la porte Trivy
 CRITICAL (corrigibles) verte sans élargir `.trivyignore`.
 
 Même logique pour le venv Python hérité (`/opt/hermes/.venv`) : un `pip install
---upgrade` épingle `certifi`, `Pillow` 13 et `brotlicffi` au-dessus des versions
+--upgrade` épingle `certifi`, `Pillow` 13, `brotlicffi` et `PyJWT` au-dessus des versions
 signalées CRITICAL par Trivy (le pip du venv est ensuite retiré), et le pip du
 Python outils (`/usr/local/bin/python3`) est monté pour son certifi vendored.
 La CI vérifie ces versions et les imports hermes. `SECURITY_CACHE_BUST`

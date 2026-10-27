@@ -107,19 +107,21 @@ jobs:
               hermes --version
             '
 
-      - name: Smoke test — certifi/Pillow/brotlicffi patchés + imports hermes
+      - name: Smoke test — certifi/Pillow/brotlicffi/PyJWT patchés + imports hermes
         run: |
           set -euo pipefail
           img="${{ env.LOCAL_TAG }}"
           docker run --rm --user hermes --entrypoint /opt/hermes/.venv/bin/python "$img" -c "
           from importlib.metadata import version
           from PIL import Image
-          import brotlicffi, certifi, hermes_cli.main, browser_harness
-          cert_v, pil_v, br_v = version('certifi'), version('pillow'), version('brotlicffi')
-          print('certifi', cert_v, 'pillow', pil_v, 'brotlicffi', br_v)
+          import brotlicffi, certifi, jwt, hermes_cli.main, browser_harness
+          cert_v, pil_v, br_v, jwt_v = version('certifi'), version('pillow'), version('brotlicffi'), version('PyJWT')
+          print('certifi', cert_v, 'pillow', pil_v, 'brotlicffi', br_v, 'pyjwt', jwt_v)
           assert tuple(int(x) for x in cert_v.split('.')) >= (2026, 10, 19), cert_v
           assert tuple(int(x) for x in pil_v.split('.')) >= (13, 0, 0), pil_v
           assert tuple(int(x) for x in br_v.split('.')) >= (1, 2, 1, 0), br_v
+          assert tuple(int(x) for x in jwt_v.split('.')) >= (2, 14, 0), jwt_v
+          assert jwt.decode(jwt.encode({'ok': 1}, 'k' * 32, algorithm='HS256'), 'k' * 32, algorithms=['HS256']) == {'ok': 1}
           assert brotlicffi.decompress(brotlicffi.compress(b'ok')) == b'ok'
           Image.new('RGB', (4, 4), color=(0, 128, 255))
           print('imports_ok')

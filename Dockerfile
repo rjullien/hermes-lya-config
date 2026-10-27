@@ -52,6 +52,9 @@ RUN echo "security-cache-bust=${SECURITY_CACHE_BUST}" \
 # upgrade les corrige ici. Pas de `.trivyignore` pour ces CRITICAL corrigibles.
 # Pillow 13 est un major bump : vérifié (hermes_cli, browser_harness importent).
 #
+# Idem PyJWT 2.13.0 (CVE-2026-102268, contournement d'authentification,
+# corrigée en 2.14.0 ; tirée par google-auth, mcp, msal, oauthlib).
+#
 # Deux sources de certifi dans la base :
 #   1. /opt/hermes/.venv (site-packages) — upgradé via ensurepip + pip, puis
 #      pip du venv retiré pour ne pas élargir la surface ;
@@ -66,12 +69,14 @@ RUN echo "security-cache-bust=${SECURITY_CACHE_BUST}" \
         "certifi==2026.10.19" \
         "Pillow==13.0.0" \
         "brotlicffi==1.2.1.0" \
+        "PyJWT==2.14.0" \
     && /opt/hermes/.venv/bin/python -m pip uninstall -y pip \
     && rm -rf /root/.cache/pip \
     && find /opt/hermes/uv-cache /root/.hermes -type d \
         \( -name 'certifi-2026.5.*' -o -name 'certifi-2026.6.*' \
            -o -name 'pillow-12.*' -o -name 'Pillow-12.*' \
-           -o -name 'brotlicffi-1.2.0.*' \) \
+           -o -name 'brotlicffi-1.2.0.*' \
+           -o -name 'pyjwt-2.13.*' -o -name 'PyJWT-2.13.*' \) \
         -prune -exec rm -rf {} + 2>/dev/null || true
 
 # --- gws : Google Workspace CLI (glibc/debian, pas de -musl) ---

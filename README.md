@@ -24,6 +24,13 @@ En plus des binaires, le `Dockerfile` applique en `USER root` un
 trixie ; cette couche les tire dans notre image pour garder la porte Trivy
 CRITICAL (corrigibles) verte sans élargir `.trivyignore`.
 
+Même logique pour le venv Python hérité (`/opt/hermes/.venv`) : un `pip install
+--upgrade` épingle `certifi`, `Pillow` 13 et `brotlicffi` au-dessus des versions
+signalées CRITICAL par Trivy (le pip du venv est ensuite retiré), et le pip du
+Python outils (`/usr/local/bin/python3`) est monté pour son certifi vendored.
+La CI vérifie ces versions et les imports hermes. `SECURITY_CACHE_BUST`
+(semaine ISO UTC) invalide ces couches apt/pip chaque semaine malgré le cache GHA.
+
 Le `Dockerfile` crée aussi un symlink `/usr/local/bin/hermes` → `/opt/hermes/bin/hermes`
 (shim amont) : depuis hermes-agent v0.21.6, le wrapper s6 ne source plus le
 venv et dépend du `ENV PATH` de l'image, que Kubernetes écrase souvent — sans
@@ -132,6 +139,29 @@ manuel sur `build.yml` ne produit que le tag `sha-<commit>` : il ne peut donc pa
 déplacer `latest` hors du flux de release (F-02). Déployer par **digest** dans
 vps-infra reste la référence immuable — `latest`/`vX.Y` sont mutables par
 construction.
+
+### Rebuild sécurité hebdomadaire
+
+Renovate ne voit pas les paquets Debian/PyPI hérités de la base digests-épinglée,
+et le cache BuildKit/GHA peut figer une couche `apt-get upgrade`. Chaque **lundi
+à 03:15 UTC** (`weekly-security-rebuild.yml`) — **04:15 Europe/Paris (CET)** /
+**05:15 Europe/Paris (CEST)** — un rebuild `--no-cache` rejoue smokes + porte
+Trivy CRITICAL :
+
+- **porte rouge** → ouverture/mise à jour d'une issue
+  `[security] Trivy CRITICAL — rebuild hebdomadaire` (rapport sans le tableau
+  « Report Summary », borné à 50 Ko, via `--body-file`), **aucune** publication ;
+- **porte verte** → fermeture de cette issue si elle est ouverte, puis
+  comparaison d'un *content-manifest* avec l'image `latest` déjà publiée :
+  `dpkg-query -W` trié + freeze-like du venv `/opt/hermes/.venv`
+  (`importlib.metadata`, pip est retiré de l'image) + versions des 3 outils (et
+  certifi vendored du Python outils). Le **digest d'image n'est pas utilisé** :
+  un rebuild no-cache change toujours les timestamps de couches ;
+- manifeste **identique** → log `no change`, exit 0, **pas** de release ;
+- manifeste **différent** → release calver + push `latest` via `build-image.yml`
+  (`no_cache: true`), puis Image Updater comme d'habitude.
+
+Déclenchement manuel : `workflow_dispatch` sur ce workflow.
 
 **Réglages serveur recommandés (hors code, F-02) :** activer la branch
 protection sur `main` (checks requis, cf. F-01) et l'immutabilité/rétention du

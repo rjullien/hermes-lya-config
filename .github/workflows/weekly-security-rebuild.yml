@@ -107,6 +107,33 @@ jobs:
               hermes --version
             '
 
+      # Garde anti-image cassée : le gateway doit vraiment démarrer (même env que K8s,
+      # volume /opt/data vierge) et répondre /health avant toute publication. Image
+      # Updater ne doit jamais recevoir une image qui ne démarre pas.
+      - name: Smoke test — le gateway démarre et répond /health
+        run: |
+          set -euo pipefail
+          img="${{ env.LOCAL_TAG }}"
+          docker volume create hermes-boot-data >/dev/null
+          docker run -d --name hermes-boot -p 127.0.0.1:8642:8642 \
+            -v hermes-boot-data:/opt/data \
+            -e HERMES_GATEWAY_LOCK_DIR=/tmp/hermes-gateway-locks \
+            -e API_SERVER_ENABLED=true -e API_SERVER_HOST=0.0.0.0 -e API_SERVER_PORT=8642 \
+            -e API_SERVER_KEY=ci-boot-test-not-a-secret \
+            -e PATH=/opt/data/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            "$img" gateway run >/dev/null
+          ok=0; start=$(date +%s)
+          for _ in $(seq 1 120); do
+            if curl -fsS --max-time 2 http://127.0.0.1:8642/health 2>/dev/null; then ok=1; break; fi
+            test "$(docker inspect -f '{{.State.Running}}' hermes-boot)" = true || break
+            sleep 1
+          done
+          echo; echo "gateway_boot_ok=$ok after $(( $(date +%s) - start ))s"
+          if [ "$ok" != 1 ]; then docker logs --tail 200 hermes-boot || true; fi
+          docker rm -f hermes-boot >/dev/null
+          docker volume rm hermes-boot-data >/dev/null
+          test "$ok" = 1
+
       - name: Smoke test — certifi/Pillow/brotlicffi/PyJWT patchés + imports hermes
         run: |
           set -euo pipefail

@@ -140,6 +140,14 @@ déplacer `latest` hors du flux de release (F-02). Déployer par **digest** dans
 vps-infra reste la référence immuable — `latest`/`vX.Y` sont mutables par
 construction.
 
+**Garde de démarrage avant publication :** `pr-validation.yml`, `weekly-security-rebuild.yml`
+et `build-image.yml` (donc toute release, manuelle ou automatique) lancent l'image
+(`gateway run`, volume `/opt/data` vierge, même env API que le Deployment K8s) et
+exigent une réponse `/health` sur le port 8642 en moins de 120 s. Sinon le job
+échoue avec les logs du conteneur et **rien n'est publié**. `build-image.yml`
+construit d'abord l'image en local (`load`), la teste, puis pousse le même build
+depuis le cache local du builder.
+
 ### Rebuild sécurité hebdomadaire
 
 Renovate ne voit pas les paquets Debian/PyPI hérités de la base digests-épinglée,

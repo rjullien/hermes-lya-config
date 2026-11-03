@@ -266,3 +266,8 @@ kubectl exec -n openclaw deploy/hermes-lya -- gws --version
 - Une release calver = un build. Pas de tag volant hors release.
 - Tout changement de comportement → update README.md (l'image est publique,
   les utilisateurs externes lisent le README).
+
+<!-- entire-agent:begin -->
+Read .entire/agent-guide.md for this repository's workflow, source inspection, and verification guidance.
+@.entire/agent-guide.md
+<!-- entire-agent:end -->
